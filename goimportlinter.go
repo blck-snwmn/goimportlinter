@@ -1,8 +1,8 @@
 package goimportlinter
 
 import (
-	"fmt"
 	"go/ast"
+	"strings"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -28,17 +28,51 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		// (*ast.ImportSpec)(nil),
 		(*ast.File)(nil),
 	}
+
+	targetDirsToAllows := map[string][]string{
+		"domain":  {"domain"},
+		"usecase": {"usecase", "domain"},
+		"handler": {"handler", "usecase"},
+	}
+
 	inspect.Preorder(nodeFilter, func(n ast.Node) {
 		switch n := n.(type) {
 		case *ast.File:
-			fmt.Println("file is ", n.Name.Name)
-			fmt.Println("file path is ", pass.Fset.File(n.Pos()))
-			for _, im := range n.Imports {
-				fmt.Println("path", im.Path.Value)
+			filePath := pass.Fset.File(n.Pos())
+
+			var allows []string
+			for t, as := range targetDirsToAllows {
+				if strings.Contains(filePath.Name(), t) {
+					allows = as
+				}
 			}
-			pass.Reportf(n.Pos(), fmt.Sprintf("%+v", n.Name))
+			if len(allows) == 0 {
+				return // no check if file is not target
+			}
+			for _, im := range n.Imports {
+				importName := im.Path.Value
+				if !hasOwnModulePrefix(importName) {
+					continue
+				}
+				var ok bool
+				for _, allow := range allows {
+					if strings.Contains(importName, allow) {
+						ok = true
+						continue
+					}
+				}
+				if ok {
+					return
+				}
+				pass.Reportf(im.Pos(), "this file can't import %s", im.Path.Value)
+			}
 		}
 	})
 
 	return nil, nil
+}
+func hasOwnModulePrefix(s string) bool {
+	// const prefix = "blck-snwmn"
+	// return strings.HasPrefix(s, prefix)
+	return true
 }
